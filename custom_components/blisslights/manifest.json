@@ -1,0 +1,11 @@
+{
+  "domain": "blisslights",
+  "name": "BlissLights",
+  "codeowners": ["@17flo"],
+  "config_flow": true,
+  "version": "1.0.0",
+  "dependencies": ["bluetooth"],
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "loggers": ["blisslights"]
+}

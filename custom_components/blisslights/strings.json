@@ -1,0 +1,34 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "description": "Pick a discovered BlissLights (Telink mesh) device. The mesh name is normally the device's advertised local name; the default password is 123.",
+        "data": {
+          "address": "Device",
+          "name": "Name",
+          "mesh_name": "Mesh name",
+          "password": "Password"
+        }
+      },
+      "device": {
+        "description": "Verify the mesh credentials. The device must be powered on and in range.",
+        "data": {
+          "address": "Address",
+          "mesh_name": "Mesh name",
+          "password": "Password",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid mesh name or password",
+      "not_found": "Device not found",
+      "missing_mesh_name": "Mesh name is required",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This device is already configured"
+    }
+  }
+}
