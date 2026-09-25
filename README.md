@@ -1,5 +1,9 @@
 # BlissLights Sky Lite — Home Assistant integration
 
+> Fork of [vik-pfqld/blisslights-telink-ha](https://github.com/vik-pfqld/blisslights-telink-ha)
+> that installs through HACS and is faster and steadier in use. See
+> [Changes in this fork](#changes-in-this-fork).
+
 A custom [Home Assistant](https://www.home-assistant.io/) integration for the
 **BlissLights Sky Lite** laser galaxy projector (and other devices built on the
 **Telink TLSR8250 BLE mesh v1** platform, e.g. the vendor app
@@ -14,13 +18,13 @@ app. Full protocol writeup: **[PROTOCOL.md](PROTOCOL.md)**.
 
 | Entity | Domain | What it does |
 |---|---|---|
-| `light.blisslights` | `light` | on/off, brightness, RGB color |
+| `light.blisslights` | `light` | on/off, brightness (Low / Medium / High), RGB color |
 | `select.blisslights_scene` | `select` | the 9 built-in scenes + 10 DIY slots (+ off) |
 | `switch.blisslights_rotation` | `switch` | laser motor (rotation) on/off |
 
-State is polled every 2 minutes over a short-lived BLE connection
-(connect → login → query → disconnect), which avoids hogging one of your
-adapter's connection slots.
+State is polled every 2 minutes. A logged-in BLE connection is reused for
+bursts of commands and dropped after 15 s idle, so it doesn't hold one of your
+adapter's connection slots between uses.
 
 ## Features
 
@@ -37,7 +41,8 @@ adapter's connection slots.
 
 ## Install (HACS custom repository)
 
-1. HACS → ⋮ → *Custom repositories* → add this repo, category
+1. HACS → ⋮ → *Custom repositories* → add
+   `https://github.com/Vortitron/blisslights-telink-ha`, category
    **Integration**.
 2. Install **BlissLights Sky Lite**, restart Home Assistant.
 3. Settings → Devices & Services → *Add Integration* → **BlissLights**.
@@ -46,6 +51,31 @@ adapter's connection slots.
 
 Or manually: copy `custom_components/blisslights/` into your
 `config/custom_components/` directory and restart.
+
+## Changes in this fork
+
+- **Installs through HACS**: adds `hacs.json`, plus the `documentation` /
+  `issue_tracker` manifest keys and `translations/en.json`.
+- **One connection per burst**: the upstream client did connect → login →
+  one command → disconnect for every command, and a state refresh took two
+  more connections (one per query), so one button press cost three full
+  BLE connects. This fork keeps the logged-in session open while commands keep
+  coming (15 s idle timeout), runs both state queries on one connection, and
+  transparently reconnects once if a reused session turns out to be dead.
+- **Optimistic state**: entities update the moment a command is sent. One
+  refresh 3 s after the last command in a burst confirms it, so the UI no
+  longer jumps back to the old state while a refresh is still running.
+- **Brightness levels**: the Sky Lite reports brightness as a level 1–3
+  (the app's Low / Medium / High), not 0–255. HA's slider maps onto the
+  three levels (85 / 170 / 255). A firmware that reports values above 3 is
+  still treated as raw 0–255.
+- **Colour from off**: turning the projector on with a colour or brightness
+  used to reuse the zeros it reads back while off, so the laser and rotation
+  came back off. It now reuses the settings from the last time it was lit.
+
+`tests/fake_device_harness.py` runs the client and entities against a fake
+Telink device (real crypto on both ends, HA and bleak stubbed):
+`python3 tests/fake_device_harness.py`.
 
 ## Configuration keys
 

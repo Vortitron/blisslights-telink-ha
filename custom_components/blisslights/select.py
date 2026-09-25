@@ -38,8 +38,7 @@ class BlissSceneSelect(BlissLightsEntity, SelectEntity):
     """Select the active scene; 'Off' is handled by the light entity."""
 
     def __init__(self, coordinator, entry, client):
-        super().__init__(coordinator, entry, kind="scene", name_suffix="Scene")
-        self._client = client
+        super().__init__(coordinator, entry, client, kind="scene", name_suffix="Scene")
         self._attr_options = OPTIONS
 
     @property
@@ -60,5 +59,4 @@ class BlissSceneSelect(BlissLightsEntity, SelectEntity):
             else:
                 return
         # {0x41, sceneId, 0x00} switches the scene (and powers on).
-        await self._client.exchange(bytes([POWER, scene_id & 0xFF, 0x00]), None)
-        await self.coordinator.async_request_refresh()
+        await self._send(bytes([POWER, scene_id & 0xFF, 0x00]), last_scene=scene_id)

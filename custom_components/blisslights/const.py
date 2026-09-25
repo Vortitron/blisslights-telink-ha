@@ -41,3 +41,19 @@ DIY_SCENE_ID_END = 19  # EFFECTDIY_MAX
 UPDATE_INTERVAL_SECONDS = 120
 CONNECT_TIMEOUT = 20
 RESPONSE_TIMEOUT = 4.0
+
+# Keep the logged-in connection open this long after the last exchange, so a
+# burst of commands (and the confirming refresh) share one connect + login.
+IDLE_DISCONNECT_SECONDS = 15
+# After a command, state is applied optimistically and confirmed by a refresh
+# this long after the last command in a burst.
+REFRESH_DELAY_SECONDS = 3
+
+# 0x48 / 0x47 channel order.
+CHANNELS = ("r", "g", "b", "laser", "motor", "bright", "breathe")
+LIGHT_CHANNELS = ("r", "g", "b", "laser")
+
+# The Sky Lite reports brightness as a level (app: Low / Medium / High), not
+# the 0-255 the app's slider resources suggest. Values above this are treated
+# as raw 0-255 for firmwares that do use the full range.
+BRIGHT_LEVELS = 3

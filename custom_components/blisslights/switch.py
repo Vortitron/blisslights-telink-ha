@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BlissLightsEntity
-from .const import DOMAIN
+from .const import CHANNELS, DOMAIN
 
 FULL_CONTROL = 0x47
 
@@ -26,12 +26,11 @@ class BlissRotationSwitch(BlissLightsEntity, SwitchEntity):
     """Laser rotation — implemented via the 0x47 full-control command.
 
     The motor byte is 0-255 (slider); app semantics: motor != 0 = rotation on.
-    We toggle between the cached value and 0.
+    We toggle between 255 and 0, keeping the other channels as they are.
     """
 
     def __init__(self, coordinator, entry, client):
-        super().__init__(coordinator, entry, kind="rotation", name_suffix="Rotation")
-        self._client = client
+        super().__init__(coordinator, entry, client, kind="rotation", name_suffix="Rotation")
 
     @property
     def is_on(self) -> bool:
@@ -46,17 +45,7 @@ class BlissRotationSwitch(BlissLightsEntity, SwitchEntity):
 
     async def _set_motor(self, value: int) -> None:
         current = self.coordinator.data
-        params = bytes(
-            [
-                FULL_CONTROL,
-                current.get("r", 0),
-                current.get("g", 0),
-                current.get("b", 0),
-                current.get("laser", 0),
-                value,
-                current.get("bright", 0),
-                current.get("breathe", 0),
-            ]
-        )
-        await self._client.exchange(params, None)
-        await self.coordinator.async_request_refresh()
+        channels = {key: current.get(key, 0) for key in CHANNELS}
+        channels["motor"] = value
+        params = bytes([FULL_CONTROL] + [channels[key] for key in CHANNELS])
+        await self._send(params, motor=value)

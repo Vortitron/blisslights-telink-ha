@@ -1,11 +1,19 @@
 {
   "domain": "blisslights",
   "name": "BlissLights",
-  "codeowners": ["@17flo"],
+  "codeowners": [
+    "@17flo"
+  ],
   "config_flow": true,
-  "version": "1.0.0",
-  "dependencies": ["bluetooth"],
+  "dependencies": [
+    "bluetooth"
+  ],
+  "documentation": "https://github.com/Vortitron/blisslights-telink-ha",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "loggers": ["blisslights"]
+  "issue_tracker": "https://github.com/Vortitron/blisslights-telink-ha/issues",
+  "loggers": [
+    "blisslights"
+  ],
+  "version": "1.1.0"
 }
