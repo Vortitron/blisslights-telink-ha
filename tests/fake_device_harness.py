@@ -150,7 +150,9 @@ class FakeDevice:
             self.on, self.scene = True, params[1]
             return None
         if op == 0x47:
-            self.on = True
+            # Sets the values but does not power the projector on from off
+            # (seen on the real Sky Lite, 2026-09-26: HA showed it on at 100%
+            # while it stayed dark until a plain 0x41 power-on).
             self.ch.update(zip(const.CHANNELS, params[1:8]))
             return None
         if op == 0x48:
@@ -287,8 +289,22 @@ async def main():
     await coord.refresh()
     assert not light.is_on and coord.data["r"] == 0
     await light.async_turn_on(rgb_color=(255, 0, 0))
+    assert DEVICE.on, "turn_on with a colour must power the projector on"
     assert DEVICE.ch["laser"] == 10 and DEVICE.ch["motor"] == 255 and DEVICE.ch["g"] == 0, DEVICE.ch
     print("colour-from-off ok:", DEVICE.ch)
+
+    # 3b. Off, then turn on with a brightness: powered on, then set.
+    await light.async_turn_off()
+    assert not DEVICE.on
+    DEVICE.commands.clear()
+    await light.async_turn_on(brightness=255)
+    assert DEVICE.on and DEVICE.ch["bright"] == 3, (DEVICE.on, DEVICE.ch)
+    assert [c[0] for c in DEVICE.commands] == [0x41, 0x47], [c.hex() for c in DEVICE.commands]
+    # Already on: no extra power packet, just the values.
+    DEVICE.commands.clear()
+    await light.async_turn_on(brightness=85)
+    assert [c[0] for c in DEVICE.commands] == [0x47] and DEVICE.ch["bright"] == 1
+    print("brightness-from-off ok")
 
     # 4. Idle disconnect releases the connection.
     await asyncio.sleep(0.8)

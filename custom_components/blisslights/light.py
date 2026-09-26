@@ -97,7 +97,10 @@ class BlissLight(BlissLightsEntity, LightEntity):
             channels["r"], channels["g"], channels["b"] = rgb
         if brightness is not None:
             channels["bright"] = bright_from_ha(brightness, channels.get("bright", 0))
-        # 0x47 both sets the values and turns the projector on.
+        # 0x47 sets the values but does not power the projector on from off,
+        # so power it on first.
+        if not self.is_on:
+            await self._send(bytes([POWER, 0x01, 0x01]), **channels)
         params = bytes([FULL_CONTROL] + [channels.get(key, 0) for key in CHANNELS])
         await self._send(params, **channels)
 
