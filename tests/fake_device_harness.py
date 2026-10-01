@@ -87,6 +87,7 @@ from blisslights.select import BlissSceneSelect  # noqa: E402
 const.IDLE_DISCONNECT_SECONDS = 0.5
 blisslights.IDLE_DISCONNECT_SECONDS = 0.5
 blisslights.RESPONSE_TIMEOUT = 0.5
+blisslights.POWER_ON_READ_DELAY = 0
 
 ADDRESS = "A4:C1:38:B5:84:05"
 MESH, PWD = "eb5786bfb857", "123"
@@ -333,6 +334,32 @@ async def main():
 
     await client.async_close()
     assert client._client is None
+
+    # 9. Off ever since HA started, so HA has never seen its channels (no
+    #    last_on), then turned on with a brightness. The zeros it reads back
+    #    while off must not be sent as the colour (seen 2026-10-01: that
+    #    blanked the projector). It comes on with its own settings and only
+    #    the brightness changes.
+    DEVICE = FakeDevice()
+    DEVICE.on = False
+    client = TelinkClient(hass, ADDRESS, MESH, PWD)
+    coord = FakeCoordinator(client)
+    await coord.refresh()
+    assert "last_on" not in coord.data and coord.data["r"] == 0
+    light = BlissLight(coord, entry, client)
+    assert not light.is_on
+    await light.async_turn_on(brightness=128)
+    assert DEVICE.on and DEVICE.ch["laser"] == 10 and DEVICE.ch["r"] == 255, DEVICE.ch
+    assert DEVICE.ch["bright"] == 2 and DEVICE.ch["motor"] == 255, DEVICE.ch
+    assert light.is_on and light.brightness == 170
+    # Same from a plain turn_on: HA shows it on with the projector's own
+    # channels instead of off until the next refresh.
+    await light.async_turn_off()
+    coord.data.pop("last_on", None)
+    await light.async_turn_on()
+    assert DEVICE.on and light.is_on and coord.data["laser"] == 10, coord.data
+    await client.async_close()
+    print("on-from-unknown ok")
     print("ALL OK")
 
 

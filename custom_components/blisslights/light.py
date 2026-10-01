@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components.light import (
@@ -23,6 +24,8 @@ from .const import BRIGHT_LEVELS, CHANNELS, DOMAIN, LIGHT_CHANNELS
 FULL_CONTROL = 0x47
 # {0x41, onOff, 0x01} = power; {0x41, sceneId, 0x00} = scene switch.
 POWER = 0x41
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -86,21 +89,41 @@ class BlissLight(BlissLightsEntity, LightEntity):
 
     # ------------------------------------------------------------ commands
 
+    async def _power_on(self) -> dict[str, int]:
+        """Power on from off; return the channels it is now lit with."""
+        channels = self._lit_channels()
+        await self._client.send(bytes([POWER, 0x01, 0x01]))
+        if is_lit(channels):
+            return channels
+        # HA has never seen it lit (off ever since HA started), so all it has
+        # is the zeros read back while off. Sending those as the colour would
+        # blank the projector, so read what powering on restored instead.
+        return await self._client.read_lit_channels() or channels
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         rgb = kwargs.get(ATTR_RGB_COLOR)
-        channels = self._lit_channels()
-        if brightness is None and rgb is None:
-            await self._send(bytes([POWER, 0x01, 0x01]), **channels)
-            return
+        if self.is_on:
+            channels = self._lit_channels()
+            if brightness is None and rgb is None:
+                await self._send(bytes([POWER, 0x01, 0x01]), **channels)
+                return
+        else:
+            # 0x47 sets the values but does not power the projector on.
+            channels = await self._power_on()
+            if brightness is None and rgb is None:
+                await self._assume(**channels)
+                return
         if rgb is not None:
             channels["r"], channels["g"], channels["b"] = rgb
         if brightness is not None:
             channels["bright"] = bright_from_ha(brightness, channels.get("bright", 0))
-        # 0x47 sets the values but does not power the projector on from off,
-        # so power it on first.
-        if not self.is_on:
-            await self._send(bytes([POWER, 0x01, 0x01]), **channels)
+        if not is_lit(channels):
+            # Lit channels unknown (it didn't answer after power-on): a 0x47
+            # with zeros would blank it, so leave it on its own settings.
+            _LOGGER.warning("Sky Lite channels unknown after power-on; brightness not set")
+            await self._assume()
+            return
         params = bytes([FULL_CONTROL] + [channels.get(key, 0) for key in CHANNELS])
         await self._send(params, **channels)
 
