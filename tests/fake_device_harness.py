@@ -145,7 +145,10 @@ class FakeDevice:
         self.commands.append(params)
         op = params[0]
         if op == 0x41 and params[2] == 0x01:
-            self.on = bool(params[1])
+            # Power on is idempotent, but power off sent while already off
+            # turns the projector ON (seen on the real Sky Lite 2026-10-05:
+            # "lights off" automations lit it).
+            self.on = bool(params[1]) or not self.on
             return None
         if op == 0x41 and params[2] == 0x00:
             self.on, self.scene = True, params[1]
@@ -360,6 +363,30 @@ async def main():
     assert DEVICE.on and light.is_on and coord.data["laser"] == 10, coord.data
     await client.async_close()
     print("on-from-unknown ok")
+
+    # 10. Off while already off must not light it: power-off toggles an
+    #     unlit projector on, so turn_off checks first.
+    await light.async_turn_off()
+    await coord.refresh()
+    assert not DEVICE.on and not light.is_on
+    DEVICE.commands.clear()
+    await light.async_turn_off()
+    assert not DEVICE.on, "turn_off while off turned it on"
+    assert [c[0] for c in DEVICE.commands] == [0x48], [c.hex() for c in DEVICE.commands]
+    await coord.refresh()
+    assert not light.is_on
+    # HA's view is stale (lit from the app or its own button since the last
+    # poll): turn_off still turns it off.
+    DEVICE.on = True
+    assert not light.is_on
+    await light.async_turn_off()
+    assert not DEVICE.on, "turn_off with stale off state left it on"
+    # Plain on while already on stays on.
+    await light.async_turn_on()
+    await light.async_turn_on()
+    assert DEVICE.on
+    await client.async_close()
+    print("off-while-off ok")
     print("ALL OK")
 
 

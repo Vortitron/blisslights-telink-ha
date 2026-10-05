@@ -184,7 +184,7 @@ All sent via `sendCommandNoResponse((byte)0xF0, meshAddr, params)`.
 
 | Params | Meaning |
 |---|---|
-| `{0x41, onOff, 0x01}` | **Power on/off** (1=on, 0=off) |
+| `{0x41, onOff, 0x01}` | **Power on/off** (1=on, 0=off). On is idempotent, but **off sent while already off turns the projector on** (live, Sky Lite, 2026-10-05): check the state (`0x48`) before sending off |
 | `{0x41, sceneId, 0x00}` | **Switch to scene/mode** (sceneId 1..N; 0 = off) |
 | `{0x47, R, G, B, laser, motor, bright, breathe}` | **Full LED control**: RGB (0-255), laser intensity, motor (rotation) speed, brightness, breathing rate. Does **not** power the projector on from off; send `{0x41, 0x01, 0x01}` first |
 | `{0x40, cfgId, p0..p6}` | scene/global config: `{0x40, id, motor, bright, onTime, offTime, defaultScene, lastScene, loopTime, isLoop}` |

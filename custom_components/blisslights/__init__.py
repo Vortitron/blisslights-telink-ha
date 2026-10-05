@@ -254,11 +254,15 @@ class TelinkClient:
             return dict(zip(CHANNELS, state[1:8]))
         return {}
 
+    async def read_channels(self) -> dict[str, Any]:
+        """Current LED channels (0x48); empty if the projector didn't answer."""
+        return await self._run(self._read_channels)
+
     async def read_lit_channels(self) -> dict[str, Any] | None:
         """Channels the projector lit up with after a power-on, or None."""
         for _ in range(POWER_ON_READ_ATTEMPTS):
             await asyncio.sleep(POWER_ON_READ_DELAY)
-            channels = await self._run(self._read_channels)
+            channels = await self.read_channels()
             if is_lit(channels):
                 return channels
         return None

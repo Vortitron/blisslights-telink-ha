@@ -128,6 +128,12 @@ class BlissLight(BlissLightsEntity, LightEntity):
         await self._send(params, **channels)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._send(
-            bytes([POWER, 0x00, 0x01]), motor=0, **{key: 0 for key in LIGHT_CHANNELS}
-        )
+        # Power-off turns a lit projector off but an unlit one ON (seen
+        # 2026-10-05: "all lights off" automations lit it), so check first.
+        # HA's state can be stale (the app or the projector's own button), so
+        # ask the projector; fall back to HA's state if it doesn't answer.
+        channels = await self._client.read_channels()
+        lit = is_lit(channels) if channels else self.is_on
+        if lit:
+            await self._client.send(bytes([POWER, 0x00, 0x01]))
+        await self._assume(motor=0, **{key: 0 for key in LIGHT_CHANNELS})
