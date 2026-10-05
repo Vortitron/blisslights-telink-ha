@@ -48,6 +48,10 @@ IDLE_DISCONNECT_SECONDS = 15
 # After a command, state is applied optimistically and confirmed by a refresh
 # this long after the last command in a burst.
 REFRESH_DELAY_SECONDS = 3
+# After powering on from a state HA has never seen lit, read the channels the
+# projector restored: up to this many 0x48 reads, this far apart.
+POWER_ON_READ_ATTEMPTS = 5
+POWER_ON_READ_DELAY = 0.3
 
 # 0x48 / 0x47 channel order.
 CHANNELS = ("r", "g", "b", "laser", "motor", "bright", "breathe")

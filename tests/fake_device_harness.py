@@ -87,6 +87,7 @@ from blisslights.select import BlissSceneSelect  # noqa: E402
 const.IDLE_DISCONNECT_SECONDS = 0.5
 blisslights.IDLE_DISCONNECT_SECONDS = 0.5
 blisslights.RESPONSE_TIMEOUT = 0.5
+blisslights.POWER_ON_READ_DELAY = 0
 
 ADDRESS = "A4:C1:38:B5:84:05"
 MESH, PWD = "eb5786bfb857", "123"
@@ -144,13 +145,18 @@ class FakeDevice:
         self.commands.append(params)
         op = params[0]
         if op == 0x41 and params[2] == 0x01:
-            self.on = bool(params[1])
+            # Power on is idempotent, but power off sent while already off
+            # turns the projector ON (seen on the real Sky Lite 2026-10-05:
+            # "lights off" automations lit it).
+            self.on = bool(params[1]) or not self.on
             return None
         if op == 0x41 and params[2] == 0x00:
             self.on, self.scene = True, params[1]
             return None
         if op == 0x47:
-            self.on = True
+            # Sets the values but does not power the projector on from off
+            # (seen on the real Sky Lite, 2026-09-26: HA showed it on at 100%
+            # while it stayed dark until a plain 0x41 power-on).
             self.ch.update(zip(const.CHANNELS, params[1:8]))
             return None
         if op == 0x48:
@@ -287,8 +293,22 @@ async def main():
     await coord.refresh()
     assert not light.is_on and coord.data["r"] == 0
     await light.async_turn_on(rgb_color=(255, 0, 0))
+    assert DEVICE.on, "turn_on with a colour must power the projector on"
     assert DEVICE.ch["laser"] == 10 and DEVICE.ch["motor"] == 255 and DEVICE.ch["g"] == 0, DEVICE.ch
     print("colour-from-off ok:", DEVICE.ch)
+
+    # 3b. Off, then turn on with a brightness: powered on, then set.
+    await light.async_turn_off()
+    assert not DEVICE.on
+    DEVICE.commands.clear()
+    await light.async_turn_on(brightness=255)
+    assert DEVICE.on and DEVICE.ch["bright"] == 3, (DEVICE.on, DEVICE.ch)
+    assert [c[0] for c in DEVICE.commands] == [0x41, 0x47], [c.hex() for c in DEVICE.commands]
+    # Already on: no extra power packet, just the values.
+    DEVICE.commands.clear()
+    await light.async_turn_on(brightness=85)
+    assert [c[0] for c in DEVICE.commands] == [0x47] and DEVICE.ch["bright"] == 1
+    print("brightness-from-off ok")
 
     # 4. Idle disconnect releases the connection.
     await asyncio.sleep(0.8)
@@ -317,6 +337,56 @@ async def main():
 
     await client.async_close()
     assert client._client is None
+
+    # 9. Off ever since HA started, so HA has never seen its channels (no
+    #    last_on), then turned on with a brightness. The zeros it reads back
+    #    while off must not be sent as the colour (seen 2026-10-01: that
+    #    blanked the projector). It comes on with its own settings and only
+    #    the brightness changes.
+    DEVICE = FakeDevice()
+    DEVICE.on = False
+    client = TelinkClient(hass, ADDRESS, MESH, PWD)
+    coord = FakeCoordinator(client)
+    await coord.refresh()
+    assert "last_on" not in coord.data and coord.data["r"] == 0
+    light = BlissLight(coord, entry, client)
+    assert not light.is_on
+    await light.async_turn_on(brightness=128)
+    assert DEVICE.on and DEVICE.ch["laser"] == 10 and DEVICE.ch["r"] == 255, DEVICE.ch
+    assert DEVICE.ch["bright"] == 2 and DEVICE.ch["motor"] == 255, DEVICE.ch
+    assert light.is_on and light.brightness == 170
+    # Same from a plain turn_on: HA shows it on with the projector's own
+    # channels instead of off until the next refresh.
+    await light.async_turn_off()
+    coord.data.pop("last_on", None)
+    await light.async_turn_on()
+    assert DEVICE.on and light.is_on and coord.data["laser"] == 10, coord.data
+    await client.async_close()
+    print("on-from-unknown ok")
+
+    # 10. Off while already off must not light it: power-off toggles an
+    #     unlit projector on, so turn_off checks first.
+    await light.async_turn_off()
+    await coord.refresh()
+    assert not DEVICE.on and not light.is_on
+    DEVICE.commands.clear()
+    await light.async_turn_off()
+    assert not DEVICE.on, "turn_off while off turned it on"
+    assert [c[0] for c in DEVICE.commands] == [0x48], [c.hex() for c in DEVICE.commands]
+    await coord.refresh()
+    assert not light.is_on
+    # HA's view is stale (lit from the app or its own button since the last
+    # poll): turn_off still turns it off.
+    DEVICE.on = True
+    assert not light.is_on
+    await light.async_turn_off()
+    assert not DEVICE.on, "turn_off with stale off state left it on"
+    # Plain on while already on stays on.
+    await light.async_turn_on()
+    await light.async_turn_on()
+    assert DEVICE.on
+    await client.async_close()
+    print("off-while-off ok")
     print("ALL OK")
 
 
