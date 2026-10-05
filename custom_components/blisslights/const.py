@@ -37,6 +37,25 @@ SCENES: dict[int, str] = {
 DIY_SCENE_ID_START = 10
 DIY_SCENE_ID_END = 19  # EFFECTDIY_MAX
 
+# id -> display name, including the 10 DIY slots. Offered by the scene select
+# and as the light's effects.
+ALL_SCENES: dict[int, str] = {
+    **SCENES,
+    **{
+        i: f"DIY {i - DIY_SCENE_ID_START + 1}"
+        for i in range(DIY_SCENE_ID_START, DIY_SCENE_ID_END + 1)
+    },
+}
+SCENE_IDS: dict[str, int] = {name: sid for sid, name in ALL_SCENES.items()}
+
+# {0x41, onOff, 0x01} = power; {0x41, sceneId, 0x00} = scene switch.
+POWER = 0x41
+# {0x47, R, G, B, laser, motor, bright, breathe}: set all channels.
+FULL_CONTROL = 0x47
+# Breathe (the app's "Fading") value to use when turning fading on before
+# the projector has been seen fading.
+DEFAULT_BREATHE = 255
+
 # Poll the device over GATT (connect + login + query + disconnect).
 UPDATE_INTERVAL_SECONDS = 120
 CONNECT_TIMEOUT = 20
