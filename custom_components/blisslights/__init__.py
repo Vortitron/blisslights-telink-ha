@@ -34,6 +34,7 @@ from .const import (
     CONF_PASSWORD,
     CONNECT_TIMEOUT,
     DOMAIN,
+    FULL_CONTROL,
     IDLE_DISCONNECT_SECONDS,
     LIGHT_CHANNELS,
     MESH_ADDRESS,
@@ -288,6 +289,22 @@ def is_lit(data: dict[str, Any]) -> bool:
     return any(data.get(key) for key in LIGHT_CHANNELS)
 
 
+def remember(data: dict[str, Any], previous: dict[str, Any]) -> dict[str, Any]:
+    """Carry what a fresh read can't show over from the previous state."""
+    # The channels from the last time it was lit, so turning it back on with
+    # a colour/brightness change doesn't zero laser + motor.
+    if is_lit(data):
+        data["last_on"] = {key: data[key] for key in CHANNELS if key in data}
+    elif "last_on" in previous:
+        data["last_on"] = previous["last_on"]
+    # The fading speed, so turning fading back on restores it.
+    if data.get("breathe"):
+        data["last_breathe"] = data["breathe"]
+    elif "last_breathe" in previous:
+        data["last_breathe"] = previous["last_breathe"]
+    return data
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     client = TelinkClient(
@@ -301,14 +318,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data = await client.query_state()
         if not data:
             raise UpdateFailed("Device did not answer state queries")
-        # Remember the channels from the last time it was lit, so turning it
-        # back on with a colour/brightness change doesn't zero laser + motor.
-        previous = coordinator.data or {}
-        if is_lit(data):
-            data["last_on"] = {key: data[key] for key in CHANNELS if key in data}
-        elif "last_on" in previous:
-            data["last_on"] = previous["last_on"]
-        return data
+        return remember(data, coordinator.data or {})
 
     coordinator = DataUpdateCoordinator(
         hass,
@@ -365,6 +375,19 @@ class BlissLightsEntity(CoordinatorEntity):
         """Send a command, show its expected result now, confirm with a refresh."""
         await self._client.send(params)
         await self._assume(**updates)
+
+    async def _set_channels(self, **changes: int) -> None:
+        """Change some channels with one 0x47, keeping the others as they are."""
+        data = self.coordinator.data or {}
+        if not is_lit(data):
+            # 0x47 doesn't power it on, and while it's off HA only knows the
+            # zeros it reads back, which would be sent as the other channels.
+            _LOGGER.info("Projector is off; %s not changed", ", ".join(changes))
+            return
+        channels = {key: data.get(key, 0) for key in CHANNELS}
+        channels.update(changes)
+        params = bytes([FULL_CONTROL] + [channels[key] for key in CHANNELS])
+        await self._send(params, **channels)
 
     async def _assume(self, **updates: Any) -> None:
         """Show the expected result of commands just sent; a refresh confirms it."""

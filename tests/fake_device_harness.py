@@ -73,7 +73,8 @@ mod("homeassistant.helpers.update_coordinator", CoordinatorEntity=CoordinatorEnt
     DataUpdateCoordinator=object, UpdateFailed=UpdateFailed)
 mod("homeassistant.helpers.entity_platform", AddEntitiesCallback=object)
 mod("homeassistant.components.light", ATTR_BRIGHTNESS="brightness", ATTR_RGB_COLOR="rgb_color",
-    ColorMode=types.SimpleNamespace(RGB="rgb"), LightEntity=object)
+    ATTR_EFFECT="effect", ColorMode=types.SimpleNamespace(RGB="rgb"), LightEntity=object,
+    LightEntityFeature=types.SimpleNamespace(EFFECT=4))
 mod("homeassistant.components.switch", SwitchEntity=object)
 mod("homeassistant.components.select", SelectEntity=object)
 
@@ -81,7 +82,7 @@ import blisslights  # noqa: E402
 from blisslights import TelinkClient  # noqa: E402
 from blisslights import const, telink_protocol as tp  # noqa: E402
 from blisslights.light import BlissLight, bright_from_ha, bright_to_ha  # noqa: E402
-from blisslights.switch import BlissRotationSwitch  # noqa: E402
+from blisslights.switch import BlissFadingSwitch, BlissRotationSwitch  # noqa: E402
 from blisslights.select import BlissSceneSelect  # noqa: E402
 
 const.IDLE_DISCONNECT_SECONDS = 0.5
@@ -128,6 +129,13 @@ def decrypt_command(key, pkt):
     return seq, bytes(data[10:20])
 
 
+# Channels a scene switch loads (made-up values; 2 has fading on).
+SCENE_PRESETS = {
+    1: dict(r=255, g=255, b=255, laser=10, motor=255, bright=3, breathe=0),
+    2: dict(r=0, g=0, b=255, laser=5, motor=255, bright=3, breathe=200),
+}
+
+
 class FakeDevice:
     def __init__(self):
         self.on = True
@@ -151,7 +159,10 @@ class FakeDevice:
             self.on = bool(params[1]) or not self.on
             return None
         if op == 0x41 and params[2] == 0x00:
-            self.on, self.scene = True, params[1]
+            # Scene switch: loads the scene's channels. Assumed not to power
+            # it on (unverified), so the integration must do that itself.
+            self.scene = params[1]
+            self.ch.update(SCENE_PRESETS.get(self.scene, {}))
             return None
         if op == 0x47:
             # Sets the values but does not power the projector on from off
@@ -233,12 +244,7 @@ class FakeCoordinator:
         self.refreshes = 0
 
     async def refresh(self):
-        data = await self.client.query_state()
-        if blisslights.is_lit(data):
-            data["last_on"] = {k: data[k] for k in const.CHANNELS}
-        elif "last_on" in self.data:
-            data["last_on"] = self.data["last_on"]
-        self.data = data
+        self.data = blisslights.remember(await self.client.query_state(), self.data)
 
     def async_set_updated_data(self, data):
         self.data = data
@@ -387,6 +393,48 @@ async def main():
     assert DEVICE.on
     await client.async_close()
     print("off-while-off ok")
+
+    # 11. Night button: on at 50% in "Stars against nebula", fading off.
+    #     Start from the Fading scene (fading on), off.
+    DEVICE = FakeDevice()
+    DEVICE.scene, DEVICE.ch = 2, dict(SCENE_PRESETS[2])
+    client = TelinkClient(hass, ADDRESS, MESH, PWD)
+    coord = FakeCoordinator(client)
+    light = BlissLight(coord, entry, client)
+    rot = BlissRotationSwitch(coord, entry, client)
+    fading = BlissFadingSwitch(coord, entry, client)
+    await coord.refresh()
+    assert coord.data["last_breathe"] == 200 and fading.is_on
+    await light.async_turn_off()
+    await coord.refresh()
+    assert not DEVICE.on and not light.is_on
+    DEVICE.commands.clear()
+    await light.async_turn_on(effect="Stars against nebula", brightness=128)
+    assert DEVICE.on and DEVICE.scene == 1, (DEVICE.on, DEVICE.scene)
+    assert DEVICE.ch == dict(SCENE_PRESETS[1], bright=2), DEVICE.ch
+    assert light.effect == "Stars against nebula" and light.brightness == 170
+    # Power on, scene, then the brightness on top of the scene's channels.
+    sent = [c[0] for c in DEVICE.commands if c[0] != 0x48]
+    assert sent == [0x41, 0x41, 0x47], [c.hex() for c in DEVICE.commands]
+    await coord.refresh()
+    assert not fading.is_on
+    # Fading on restores the speed it was last seen at; off clears only it.
+    await fading.async_turn_on()
+    assert DEVICE.ch["breathe"] == 200 and DEVICE.ch["laser"] == 10, DEVICE.ch
+    await fading.async_turn_off()
+    assert DEVICE.ch == dict(SCENE_PRESETS[1], bright=2), DEVICE.ch
+    await coord.refresh()
+    assert not fading.is_on and light.is_on and rot.is_on
+    # While off, the switches leave the projector alone: a 0x47 would send
+    # the zeros read back while off.
+    await light.async_turn_off()
+    await coord.refresh()
+    DEVICE.commands.clear()
+    await fading.async_turn_on()
+    await rot.async_turn_off()
+    assert DEVICE.commands == [] and not DEVICE.on, [c.hex() for c in DEVICE.commands]
+    await client.async_close()
+    print("scene + fading ok")
     print("ALL OK")
 
 

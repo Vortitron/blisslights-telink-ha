@@ -7,23 +7,31 @@ from typing import Any
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
+    ATTR_EFFECT,
     ATTR_RGB_COLOR,
     ColorMode,
     LightEntity,
+    LightEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BlissLightsEntity, is_lit
-from .const import BRIGHT_LEVELS, CHANNELS, DOMAIN, LIGHT_CHANNELS
+from .const import (
+    ALL_SCENES,
+    BRIGHT_LEVELS,
+    CHANNELS,
+    DOMAIN,
+    FULL_CONTROL,
+    LIGHT_CHANNELS,
+    POWER,
+    SCENE_IDS,
+)
 
 # 0x47 full-control payload: R, G, B, laser, motor, bright, breathe — raw
 # bytes, except bright, which the Sky Lite treats as a level (see
 # BRIGHT_LEVELS).
-FULL_CONTROL = 0x47
-# {0x41, onOff, 0x01} = power; {0x41, sceneId, 0x00} = scene switch.
-POWER = 0x41
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,10 +58,12 @@ def bright_from_ha(brightness: int, current: int) -> int:
 
 
 class BlissLight(BlissLightsEntity, LightEntity):
-    """Sky Lite projector: on/off, brightness level, RGB."""
+    """Sky Lite projector: on/off, brightness level, RGB, scene as effect."""
 
     _attr_color_mode = ColorMode.RGB
     _attr_supported_color_modes = {ColorMode.RGB}
+    _attr_supported_features = LightEntityFeature.EFFECT
+    _attr_effect_list = list(ALL_SCENES.values())
 
     def __init__(self, coordinator, entry, client):
         super().__init__(coordinator, entry, client, kind="light")
@@ -87,6 +97,11 @@ class BlissLight(BlissLightsEntity, LightEntity):
             return None
         return (self._byte("r"), self._byte("g"), self._byte("b"))
 
+    @property
+    def effect(self) -> str | None:
+        scene = self.coordinator.data.get("last_scene")
+        return ALL_SCENES.get(scene) if isinstance(scene, int) else None
+
     # ------------------------------------------------------------ commands
 
     async def _power_on(self) -> dict[str, int]:
@@ -103,17 +118,26 @@ class BlissLight(BlissLightsEntity, LightEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         rgb = kwargs.get(ATTR_RGB_COLOR)
+        scene_id = SCENE_IDS.get(kwargs.get(ATTR_EFFECT))
+        set_values = brightness is not None or rgb is not None
+        updates: dict[str, Any] = {}
         if self.is_on:
             channels = self._lit_channels()
-            if brightness is None and rgb is None:
+            if not set_values and scene_id is None:
                 await self._send(bytes([POWER, 0x01, 0x01]), **channels)
                 return
         else:
             # 0x47 sets the values but does not power the projector on.
             channels = await self._power_on()
-            if brightness is None and rgb is None:
-                await self._assume(**channels)
-                return
+        if scene_id is not None:
+            # The scene brings its own channels, so switch first, read them
+            # back, then apply any brightness or colour on top.
+            await self._client.send(bytes([POWER, scene_id, 0x00]))
+            updates["last_scene"] = scene_id
+            channels = await self._client.read_lit_channels() or channels
+        if not set_values:
+            await self._assume(**updates, **channels)
+            return
         if rgb is not None:
             channels["r"], channels["g"], channels["b"] = rgb
         if brightness is not None:
@@ -122,10 +146,10 @@ class BlissLight(BlissLightsEntity, LightEntity):
             # Lit channels unknown (it didn't answer after power-on): a 0x47
             # with zeros would blank it, so leave it on its own settings.
             _LOGGER.warning("Sky Lite channels unknown after power-on; brightness not set")
-            await self._assume()
+            await self._assume(**updates)
             return
         params = bytes([FULL_CONTROL] + [channels.get(key, 0) for key in CHANNELS])
-        await self._send(params, **channels)
+        await self._send(params, **updates, **channels)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         # Power-off turns a lit projector off but an unlit one ON (seen

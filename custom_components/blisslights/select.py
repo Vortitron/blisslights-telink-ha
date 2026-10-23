@@ -10,19 +10,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BlissLightsEntity
-from .const import DIY_SCENE_ID_END, DIY_SCENE_ID_START, DOMAIN, SCENES
+from .const import ALL_SCENES, DOMAIN, POWER, SCENE_IDS
 
 _LOGGER = logging.getLogger(__name__)
 
-POWER = 0x41
-
-# id -> display name, including the 10 DIY slots
-ALL_SCENES: dict[int, str] = dict(SCENES)
-for _i in range(DIY_SCENE_ID_START, DIY_SCENE_ID_END + 1):
-    ALL_SCENES[_i] = f"DIY {_i - DIY_SCENE_ID_START + 1}"
-
 OPTIONS = list(ALL_SCENES.values())
-NAME_TO_ID = {name: sid for sid, name in ALL_SCENES.items()}
+NAME_TO_ID = SCENE_IDS
 
 
 async def async_setup_entry(

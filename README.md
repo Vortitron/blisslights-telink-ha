@@ -18,9 +18,10 @@ app. Full protocol writeup: **[PROTOCOL.md](PROTOCOL.md)**.
 
 | Entity | Domain | What it does |
 |---|---|---|
-| `light.blisslights` | `light` | on/off, brightness (Low / Medium / High), RGB color |
+| `light.blisslights` | `light` | on/off, brightness (Low / Medium / High), RGB color, scene as effect |
 | `select.blisslights_scene` | `select` | the 9 built-in scenes + 10 DIY slots (+ off) |
 | `switch.blisslights_rotation` | `switch` | laser motor (rotation) on/off |
+| `switch.blisslights_fading` | `switch` | the app's Fading (breathing) toggle on/off |
 
 State is polled every 2 minutes. A logged-in BLE connection is reused for
 bursts of commands and dropped after 15 s idle, so it doesn't hold one of your
@@ -72,6 +73,13 @@ Or manually: copy `custom_components/blisslights/` into your
 - **Colour from off**: turning the projector on with a colour or brightness
   used to reuse the zeros it reads back while off, so the laser and rotation
   came back off. It now reuses the settings from the last time it was lit.
+- **Scene as a light effect**: `light.turn_on` takes `effect: <scene name>`,
+  so one call can power on, switch scene, and set the brightness on top of
+  the scene's own settings, in that order. Example:
+  `light.turn_on` with `effect: Stars against nebula` and `brightness_pct: 50`.
+- **Fading switch**: the app's Fading (breathing) toggle, the `breathe`
+  channel. Turning it back on restores the last speed seen. Rotation and
+  Fading only act while the projector is lit.
 
 `tests/fake_device_harness.py` runs the client and entities against a fake
 Telink device (real crypto on both ends, HA and bleak stubbed):
