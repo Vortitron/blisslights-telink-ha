@@ -37,6 +37,8 @@ from .const import (
     IDLE_DISCONNECT_SECONDS,
     LIGHT_CHANNELS,
     MESH_ADDRESS,
+    POWER_ON_READ_ATTEMPTS,
+    POWER_ON_READ_DELAY,
     REFRESH_DELAY_SECONDS,
     RESPONSE_TIMEOUT,
     UPDATE_INTERVAL_SECONDS,
@@ -245,15 +247,31 @@ class TelinkClient:
 
         await self._run(_op)
 
+    async def _read_channels(self, client: BleakClient, sk: bytes) -> dict[str, Any]:
+        # {0x48} -> R, G, B, laser, motor, bright, breathe
+        state = await self._request(client, sk, bytes([0x48]), 0x48)
+        if state is not None and len(state) >= 8:
+            return dict(zip(CHANNELS, state[1:8]))
+        return {}
+
+    async def read_channels(self) -> dict[str, Any]:
+        """Current LED channels (0x48); empty if the projector didn't answer."""
+        return await self._run(self._read_channels)
+
+    async def read_lit_channels(self) -> dict[str, Any] | None:
+        """Channels the projector lit up with after a power-on, or None."""
+        for _ in range(POWER_ON_READ_ATTEMPTS):
+            await asyncio.sleep(POWER_ON_READ_DELAY)
+            channels = await self.read_channels()
+            if is_lit(channels):
+                return channels
+        return None
+
     async def query_state(self) -> dict[str, Any]:
         """Read LED state (0x48) and global config (0x44 0xFF) in one session."""
 
         async def _op(client: BleakClient, sk: bytes) -> dict[str, Any]:
-            data: dict[str, Any] = {}
-            # {0x48} -> R, G, B, laser, motor, bright, breathe
-            state = await self._request(client, sk, bytes([0x48]), 0x48)
-            if state is not None and len(state) >= 8:
-                data.update(zip(CHANNELS, state[1:8]))
+            data = await self._read_channels(client, sk)
             # {0x44, 0xFF} -> [0x44, 0xFF, motor, bright, onTime, offTime,
             #                    defaultScene, lastScene, loopTime, isLoop]
             cfg = await self._request(client, sk, bytes([0x44, 0xFF]), 0x44)
@@ -346,6 +364,10 @@ class BlissLightsEntity(CoordinatorEntity):
     async def _send(self, params: bytes, **updates: Any) -> None:
         """Send a command, show its expected result now, confirm with a refresh."""
         await self._client.send(params)
+        await self._assume(**updates)
+
+    async def _assume(self, **updates: Any) -> None:
+        """Show the expected result of commands just sent; a refresh confirms it."""
         self.coordinator.async_set_updated_data({**(self.coordinator.data or {}), **updates})
         await self.coordinator.async_request_refresh()
 
